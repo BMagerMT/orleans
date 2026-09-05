@@ -20,7 +20,7 @@ public class PooledCacheCompatibilityTests
     [InlineData(false, StreamSubscriptionStartPosition.EarliestAvailable)]
     [InlineData(true, StreamSubscriptionStartPosition.Latest)]
     [InlineData(true, StreamSubscriptionStartPosition.EarliestAvailable)]
-    public void LegacyPositionPreservesPooledProviderBehavior(
+    public void TypedPositionMatchesReleasedTokenCursorBehavior(
         bool useMemoryCache,
         StreamSubscriptionStartPosition position)
     {
@@ -64,12 +64,14 @@ public class PooledCacheCompatibilityTests
         }
 
 #pragma warning disable CS0618 // Verify compatibility of the obsolete wrapper.
-        using var legacyCursor = cache.GetCacheCursorAtPosition(stream, position);
+        using var legacyCursor = cache.GetCacheCursor(
+            stream,
+            position == StreamSubscriptionStartPosition.Latest ? null : new EventSequenceTokenV2(1));
         var legacyHasMessage = legacyCursor.MoveNext();
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => cache.GetCacheCursorAtPosition(stream, (StreamSubscriptionStartPosition)123));
 #pragma warning restore CS0618
 
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => cache.TryGetCacheCursorAtPosition(stream, (StreamSubscriptionStartPosition)123));
         var result = cache.TryGetCacheCursorAtPosition(stream, position);
         Assert.Equal(QueueCacheCursorResultKind.Success, result.Kind);
         Assert.NotNull(result.Cursor);

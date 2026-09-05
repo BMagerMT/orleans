@@ -223,17 +223,6 @@ namespace Orleans.Providers
             return WrapCursorResult(cache.TryGetCursorAtPosition(streamId, startPosition));
         }
 
-        /// <inheritdoc />
-        [Obsolete("Use IQueueCache.TryGetCacheCursorAtPosition instead.")]
-        IQueueCacheCursor IQueueCache.GetCacheCursorAtPosition(
-            StreamId streamId,
-            StreamSubscriptionStartPosition startPosition)
-        {
-#pragma warning disable CS0618 // Translate the pooled cache result for legacy callers.
-            return new Cursor(cache, cache.GetCursorAtPosition(streamId, startPosition));
-#pragma warning restore CS0618
-        }
-
         private QueueCacheCursorResult<IQueueCacheCursor> WrapCursorResult(QueueCacheCursorResult<object> result)
             => result.Kind switch
             {

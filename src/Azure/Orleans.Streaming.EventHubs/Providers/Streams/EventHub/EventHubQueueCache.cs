@@ -158,22 +158,6 @@ namespace Orleans.Streaming.EventHubs
             StreamSubscriptionStartPosition startPosition)
             => cache.TryGetCursorAtPosition(streamId, startPosition);
 
-        [Obsolete("Use TryGetCursorAtPosition instead.")]
-        object IEventHubQueueCache.GetCursorAtPosition(
-            StreamId streamId,
-            StreamSubscriptionStartPosition startPosition)
-        {
-            var result = cache.TryGetCursorAtPosition(streamId, startPosition);
-            return result.Kind switch
-            {
-                QueueCacheCursorResultKind.Success => result.Cursor!,
-                QueueCacheCursorResultKind.CacheMiss => throw result.CacheMiss!.Value.ToException(),
-                QueueCacheCursorResultKind.NotSupported => throw new NotSupportedException(
-                    $"{GetType().FullName} does not support {startPosition} cursor positioning."),
-                _ => throw new InvalidOperationException("The cursor result is not initialized."),
-            };
-        }
-
         /// <inheritdoc />
         public void Refresh(object cursor, StreamSequenceToken? sequenceToken)
         {

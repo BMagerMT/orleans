@@ -465,9 +465,6 @@ namespace Orleans.Providers
 
         public bool IsUnderPressure() { throw null; }
 
-        [System.Obsolete("Use IQueueCache.TryGetCacheCursorAtPosition instead.")]
-        Orleans.Streams.IQueueCacheCursor Orleans.Streams.IQueueCache.GetCacheCursorAtPosition(Runtime.StreamId streamId, Orleans.Streams.StreamSubscriptionStartPosition startPosition) { throw null; }
-
         Orleans.Streams.QueueCacheCursorResult<Orleans.Streams.IQueueCacheCursor> Orleans.Streams.IQueueCache.TryGetCacheCursor(Runtime.StreamId streamId, Orleans.Streams.StreamSequenceToken? token) { throw null; }
 
         Orleans.Streams.QueueCacheCursorResult<Orleans.Streams.IQueueCacheCursor> Orleans.Streams.IQueueCache.TryGetCacheCursorAtPosition(Runtime.StreamId streamId, Orleans.Streams.StreamSubscriptionStartPosition startPosition) { throw null; }
@@ -845,9 +842,6 @@ namespace Orleans.Providers.Streams.Common
         [System.Obsolete("Use TryGetCursor instead.")]
         public object GetCursor(Runtime.StreamId streamId, Orleans.Streams.StreamSequenceToken? sequenceToken) { throw null; }
 
-        [System.Obsolete("Use TryGetCursorAtPosition instead.")]
-        public object GetCursorAtPosition(Runtime.StreamId streamId, Orleans.Streams.StreamSubscriptionStartPosition startPosition) { throw null; }
-
         public void Refresh(object cursorObj, Orleans.Streams.StreamSequenceToken? sequenceToken) { }
 
         public void RemoveOldestMessage() { }
@@ -919,9 +913,6 @@ namespace Orleans.Providers.Streams.Common
         public int GetMaxAddCount() { throw null; }
 
         public virtual bool IsUnderPressure() { throw null; }
-
-        [System.Obsolete("Use IQueueCache.TryGetCacheCursorAtPosition instead.")]
-        Orleans.Streams.IQueueCacheCursor Orleans.Streams.IQueueCache.GetCacheCursorAtPosition(Runtime.StreamId streamId, Orleans.Streams.StreamSubscriptionStartPosition startPosition) { throw null; }
 
         Orleans.Streams.QueueCacheCursorResult<Orleans.Streams.IQueueCacheCursor> Orleans.Streams.IQueueCache.TryGetCacheCursor(Runtime.StreamId streamId, Orleans.Streams.StreamSequenceToken? token) { throw null; }
 
@@ -1053,9 +1044,6 @@ namespace Orleans.Providers.Streams.Generator
         public Orleans.Streams.StreamSequenceToken GetSequenceToken(ref Common.CachedMessage cachedMessage) { throw null; }
 
         public bool IsUnderPressure() { throw null; }
-
-        [System.Obsolete("Use IQueueCache.TryGetCacheCursorAtPosition instead.")]
-        Orleans.Streams.IQueueCacheCursor Orleans.Streams.IQueueCache.GetCacheCursorAtPosition(Runtime.StreamId streamId, Orleans.Streams.StreamSubscriptionStartPosition startPosition) { throw null; }
 
         Orleans.Streams.QueueCacheCursorResult<Orleans.Streams.IQueueCacheCursor> Orleans.Streams.IQueueCache.TryGetCacheCursor(Runtime.StreamId streamId, Orleans.Streams.StreamSequenceToken? token) { throw null; }
 
@@ -1704,8 +1692,6 @@ namespace Orleans.Streams
         void AddToCache(System.Collections.Generic.IList<IBatchContainer> messages);
         [System.Obsolete("Use TryGetCacheCursor instead.")]
         IQueueCacheCursor GetCacheCursor(Runtime.StreamId streamId, StreamSequenceToken? token);
-        [System.Obsolete("Use TryGetCacheCursorAtPosition instead.")]
-        IQueueCacheCursor GetCacheCursorAtPosition(Runtime.StreamId streamId, StreamSubscriptionStartPosition startPosition);
         bool IsUnderPressure();
         QueueCacheCursorResult<IQueueCacheCursor> TryGetCacheCursor(Runtime.StreamId streamId, StreamSequenceToken? token);
         QueueCacheCursorResult<IQueueCacheCursor> TryGetCacheCursorAtPosition(Runtime.StreamId streamId, StreamSubscriptionStartPosition startPosition);

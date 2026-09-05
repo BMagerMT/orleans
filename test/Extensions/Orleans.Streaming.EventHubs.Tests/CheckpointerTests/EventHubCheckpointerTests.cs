@@ -79,7 +79,7 @@ public class EventHubCheckpointerTests
         public object Cursor { get; } = new();
         public object? RefreshedCursor { get; private set; }
         public StreamSequenceToken? RefreshToken { get; private set; }
-        public QueueCacheMissException? CursorException { get; set; }
+        public Exception? CursorException { get; set; }
         public QueueCacheMissException? MoveNextException { get; set; }
         public IBatchContainer? NoDataMessage { get; set; }
 
@@ -146,57 +146,46 @@ public class EventHubCheckpointerTests
     }
 
     [Fact, TestCategory("BVT")]
-    public void GetCursorAtPositionPreservesLegacyEventHubCacheBehavior()
+    public void GetCursorPreservesLegacyEventHubCacheBehavior()
     {
-        IEventHubQueueCache cache = new TestEventHubQueueCache();
+        var provider = new TestEventHubQueueCache();
+        IEventHubQueueCache cache = provider;
         var streamId = StreamId.Create("namespace", Guid.NewGuid());
 
 #pragma warning disable CS0618 // Verify compatibility of the obsolete wrapper.
-        Assert.Same(cache.GetCursor(streamId, null), cache.GetCursorAtPosition(streamId, StreamSubscriptionStartPosition.Latest));
-        Assert.Throws<NotSupportedException>(
-            () => cache.GetCursorAtPosition(streamId, StreamSubscriptionStartPosition.EarliestAvailable));
+        Assert.Same(provider.Cursor, cache.GetCursor(streamId, null));
 
         var innerException = new InvalidOperationException("inner");
         var expected = new QueueCacheMissException("provider message", innerException);
         cache = new TestEventHubQueueCache { CursorException = expected };
         var actual = Assert.Throws<QueueCacheMissException>(
-            () => cache.GetCursorAtPosition(streamId, StreamSubscriptionStartPosition.Latest));
+            () => cache.GetCursor(streamId, null));
 #pragma warning restore CS0618
 
         Assert.Same(expected, actual);
         Assert.Same(innerException, actual.InnerException);
     }
 
-    [Theory, TestCategory("BVT")]
-    [InlineData(StreamSubscriptionStartPosition.Latest)]
-    [InlineData(StreamSubscriptionStartPosition.EarliestAvailable)]
-    public void TypedPositionDispatchesToLegacyEventHubProvider(StreamSubscriptionStartPosition position)
+    [Fact, TestCategory("BVT")]
+    public void TypedLatestPositionUsesEventHubTypedAcquisition()
     {
-        var provider = new LegacyPositionEventHubQueueCache
+        var provider = new TypedAcquisitionEventHubQueueCache
         {
-            CursorException = new QueueCacheMissException("Token acquisition must not be used for positioning."),
+            CursorException = new InvalidOperationException("Positioning must use typed acquisition."),
         };
         IEventHubQueueCache cache = provider;
         var stream = StreamId.Create("namespace", Guid.NewGuid());
 
-        var result = cache.TryGetCursorAtPosition(stream, position);
+        var result = cache.TryGetCursorAtPosition(stream, StreamSubscriptionStartPosition.Latest);
 
         Assert.Equal(QueueCacheCursorResultKind.Success, result.Kind);
         Assert.Same(provider.Cursor, result.Cursor);
         Assert.Null(result.CacheMiss);
-        Assert.Equal((stream, position), provider.Request);
-    }
+        Assert.Equal(stream, provider.Request!.Value.StreamId);
+        Assert.Null(provider.Request.Value.Token);
 
-    [Fact, TestCategory("BVT")]
-    public void TypedPositionAdaptsLegacyEventHubFailures()
-    {
-        var provider = new LegacyPositionEventHubQueueCache
-        {
-            PositionException = new QueueCacheMissException("requested", "low", "high"),
-        };
-        IEventHubQueueCache cache = provider;
-
-        var result = cache.TryGetCursorAtPosition(default, StreamSubscriptionStartPosition.EarliestAvailable);
+        provider.Result = QueueCacheCursorResult<object>.FromCacheMiss(new("requested", "low", "high"));
+        result = cache.TryGetCursorAtPosition(stream, StreamSubscriptionStartPosition.Latest);
         Assert.Equal(QueueCacheCursorResultKind.CacheMiss, result.Kind);
         Assert.Null(result.Cursor);
         var miss = Assert.NotNull(result.CacheMiss);
@@ -204,16 +193,16 @@ public class EventHubCheckpointerTests
         Assert.Equal("low", miss.Low);
         Assert.Equal("high", miss.High);
 
-        provider.PositionException = new NotSupportedException();
-        result = cache.TryGetCursorAtPosition(default, StreamSubscriptionStartPosition.EarliestAvailable);
+        provider.Result = QueueCacheCursorResult<object>.NotSupported;
+        result = cache.TryGetCursorAtPosition(stream, StreamSubscriptionStartPosition.Latest);
         Assert.Equal(QueueCacheCursorResultKind.NotSupported, result.Kind);
         Assert.Null(result.Cursor);
         Assert.Null(result.CacheMiss);
 
-        var failure = new InvalidOperationException("Provider failure");
-        provider.PositionException = failure;
-        Assert.Same(failure, Assert.Throws<InvalidOperationException>(
-            () => cache.TryGetCursorAtPosition(default, StreamSubscriptionStartPosition.Latest)));
+        provider.Request = null;
+        result = cache.TryGetCursorAtPosition(stream, StreamSubscriptionStartPosition.EarliestAvailable);
+        Assert.Equal(QueueCacheCursorResultKind.NotSupported, result.Kind);
+        Assert.Null(provider.Request);
     }
 
     [Fact, TestCategory("BVT")]
@@ -233,6 +222,31 @@ public class EventHubCheckpointerTests
 
         Assert.Throws<ArgumentOutOfRangeException>(
             () => cache.TryGetCursorAtPosition(default, (StreamSubscriptionStartPosition)123));
+
+        provider.CursorException = new QueueCacheMissException("requested", "low", "high");
+        latest = cache.TryGetCursorAtPosition(default, StreamSubscriptionStartPosition.Latest);
+        Assert.Equal(QueueCacheCursorResultKind.CacheMiss, latest.Kind);
+        Assert.Null(latest.Cursor);
+        var miss = Assert.NotNull(latest.CacheMiss);
+        Assert.Equal("requested", miss.Requested);
+        Assert.Equal("low", miss.Low);
+        Assert.Equal("high", miss.High);
+    }
+
+    [Theory, TestCategory("BVT")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TypedLatestPositionPropagatesUnexpectedEventHubErrors(bool notSupported)
+    {
+        Exception expected = notSupported
+            ? new NotSupportedException("Token acquisition failure")
+            : new InvalidOperationException("Provider failure");
+        IEventHubQueueCache cache = new TestEventHubQueueCache { CursorException = expected };
+
+        var actual = Record.Exception(
+            () => cache.TryGetCursorAtPosition(default, StreamSubscriptionStartPosition.Latest));
+
+        Assert.Same(expected, actual);
     }
 
     [Fact, TestCategory("BVT")]
@@ -254,22 +268,17 @@ public class EventHubCheckpointerTests
         Assert.Null(result.CacheMiss);
     }
 
-    private sealed class LegacyPositionEventHubQueueCache : TestEventHubQueueCache, IEventHubQueueCache
+    private sealed class TypedAcquisitionEventHubQueueCache : TestEventHubQueueCache, IEventHubQueueCache
     {
-        public Exception? PositionException { get; set; }
-        public (StreamId, StreamSubscriptionStartPosition)? Request { get; private set; }
+        public QueueCacheCursorResult<object>? Result { get; set; }
+        public (StreamId StreamId, StreamSequenceToken? Token)? Request { get; set; }
 
-        object IEventHubQueueCache.GetCursorAtPosition(
+        QueueCacheCursorResult<object> IEventHubQueueCache.TryGetCursor(
             StreamId streamId,
-            StreamSubscriptionStartPosition startPosition)
+            StreamSequenceToken? token)
         {
-            Request = (streamId, startPosition);
-            if (PositionException is { } exception)
-            {
-                throw exception;
-            }
-
-            return Cursor;
+            Request = (streamId, token);
+            return Result ?? QueueCacheCursorResult<object>.FromCursor(Cursor);
         }
     }
 

@@ -487,9 +487,6 @@ namespace Orleans.Streaming.EventHubs
 
         public int GetMaxAddCount() { throw null; }
 
-        [System.Obsolete("Use TryGetCursorAtPosition instead.")]
-        object IEventHubQueueCache.GetCursorAtPosition(Runtime.StreamId streamId, Streams.StreamSubscriptionStartPosition startPosition) { throw null; }
-
         public void Refresh(object cursor, Streams.StreamSequenceToken? sequenceToken) { }
 
         public void SignalPurge() { }
@@ -582,8 +579,6 @@ namespace Orleans.Streaming.EventHubs
         void AddCachePressureMonitor(ICachePressureMonitor monitor);
         [System.Obsolete("Use TryGetCursor instead.")]
         object GetCursor(Runtime.StreamId streamId, Streams.StreamSequenceToken? sequenceToken);
-        [System.Obsolete("Use TryGetCursorAtPosition instead.")]
-        object GetCursorAtPosition(Runtime.StreamId streamId, Streams.StreamSubscriptionStartPosition startPosition);
         void Refresh(object cursor, Streams.StreamSequenceToken? sequenceToken);
         void SignalPurge();
         Streams.QueueCacheCursorResult<object> TryGetCursor(Runtime.StreamId streamId, Streams.StreamSequenceToken? sequenceToken);

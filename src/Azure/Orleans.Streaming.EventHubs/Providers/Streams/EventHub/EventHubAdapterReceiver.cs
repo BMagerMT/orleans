@@ -257,15 +257,6 @@ namespace Orleans.Streaming.EventHubs
             return new Cursor(this.cache!, streamId, token);
         }
 
-        /// <inheritdoc />
-        [Obsolete("Use IQueueCache.TryGetCacheCursorAtPosition instead.")]
-        IQueueCacheCursor IQueueCache.GetCacheCursorAtPosition(
-            StreamId streamId,
-            StreamSubscriptionStartPosition startPosition)
-        {
-            return new Cursor(this.cache!, streamId, startPosition);
-        }
-
         QueueCacheCursorResult<IQueueCacheCursor> IQueueCache.TryGetCacheCursor(
             StreamId streamId,
             StreamSequenceToken? token)
@@ -453,14 +444,6 @@ namespace Orleans.Streaming.EventHubs
                 this.cache = cache;
 #pragma warning disable CS0618 // Preserve the exact legacy exception and cursor behavior.
                 this.cursor = cache.GetCursor(streamId, token);
-#pragma warning restore CS0618
-            }
-
-            public Cursor(IEventHubQueueCache cache, StreamId streamId, StreamSubscriptionStartPosition startPosition)
-            {
-                this.cache = cache;
-#pragma warning disable CS0618 // Preserve the exact legacy exception and cursor behavior.
-                this.cursor = cache.GetCursorAtPosition(streamId, startPosition);
 #pragma warning restore CS0618
             }
 

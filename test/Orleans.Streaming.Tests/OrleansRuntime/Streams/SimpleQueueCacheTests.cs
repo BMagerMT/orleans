@@ -92,18 +92,18 @@ public class SimpleQueueCacheTests
     }
 
     [Fact, TestCategory("BVT"), TestCategory("Streaming")]
-    public void LegacyLatestStartsAfterNewestRetainedMessage()
+    public void LegacyNullTokenStartsAtNewestRetainedMessage()
     {
         var cache = new SimpleQueueCache(10, NullLogger.Instance);
         var stream = StreamId.Create("namespace", Guid.NewGuid());
         cache.AddToCache([new TestBatchContainer(stream, 1)]);
 
 #pragma warning disable CS0618 // Verify compatibility of the obsolete wrapper.
-        var cursor = ((IQueueCache)cache).GetCacheCursorAtPosition(
-            stream,
-            StreamSubscriptionStartPosition.Latest);
+        using var cursor = ((IQueueCache)cache).GetCacheCursor(stream, null);
 #pragma warning restore CS0618
 
+        Assert.Equal(QueueCacheCursorMoveResultKind.Success, cursor.MoveNextWithResult().Kind);
+        Assert.Equal(1, cursor.GetCurrent(out _)!.SequenceToken.SequenceNumber);
         Assert.Equal(QueueCacheCursorMoveResultKind.NoData, cursor.MoveNextWithResult().Kind);
         var futureToken = new EventSequenceTokenV2(2);
         cache.AddToCache([new TestBatchContainer(stream, futureToken)]);
@@ -122,6 +122,71 @@ public class SimpleQueueCacheTests
         Assert.Equal(QueueCacheCursorResultKind.Success, result.Kind);
         Assert.True(cache.GetCacheCursorCalled);
         Assert.Same(cache.Cursor, result.Cursor);
+    }
+
+    [Fact, TestCategory("BVT"), TestCategory("Streaming")]
+    public void LegacyCursorDefaultAdapterPreservesDerivedSimpleQueueCacheCursorOverrides()
+    {
+        var cache = new DerivedCursorSimpleQueueCache();
+        var stream = StreamId.Create("namespace", Guid.NewGuid());
+
+        var acquisition = ((IQueueCache)cache).TryGetCacheCursor(stream, null);
+
+        Assert.Equal(QueueCacheCursorResultKind.Success, acquisition.Kind);
+        var cursor = Assert.IsType<DerivedSimpleQueueCacheCursor>(acquisition.Cursor);
+        Assert.Same(cache.Cursor, cursor);
+        Assert.Equal(1, cache.GetCacheCursorCount);
+        try
+        {
+            IQueueCacheCursor interfaceCursor = cursor;
+            Assert.Equal(QueueCacheCursorMoveResultKind.NoData, interfaceCursor.MoveNextWithResult().Kind);
+
+            var first = new TestBatchContainer(stream, 1);
+            cache.AddToCache([first]);
+            interfaceCursor.Refresh(first.SequenceToken);
+            Assert.Equal(QueueCacheCursorMoveResultKind.Success, interfaceCursor.MoveNextWithResult().Kind);
+            Assert.Same(first, interfaceCursor.GetCurrent(out var firstException));
+            Assert.Null(firstException);
+            Assert.Equal(QueueCacheCursorMoveResultKind.NoData, interfaceCursor.MoveNextWithResult().Kind);
+
+            var second = new TestBatchContainer(stream, 2);
+            cache.AddToCache([second]);
+            interfaceCursor.Refresh(second.SequenceToken);
+            Assert.Equal(QueueCacheCursorMoveResultKind.Success, interfaceCursor.MoveNextWithResult().Kind);
+            Assert.Same(second, interfaceCursor.GetCurrent(out var secondException));
+            Assert.Null(secondException);
+
+            var requested = new EventSequenceTokenV2(0);
+            var low = new EventSequenceTokenV2(1);
+            var high = new EventSequenceTokenV2(2);
+            cursor.NextMoveException = new QueueCacheMissException(requested, low, high);
+            var cacheMissResult = interfaceCursor.MoveNextWithResult();
+            Assert.Equal(QueueCacheCursorMoveResultKind.CacheMiss, cacheMissResult.Kind);
+            var cacheMiss = Assert.NotNull(cacheMissResult.CacheMiss);
+            Assert.Equal(requested.ToString(), cacheMiss.Requested);
+            Assert.Equal(low.ToString(), cacheMiss.Low);
+            Assert.Equal(high.ToString(), cacheMiss.High);
+            var legacyException = cacheMiss.ToException();
+            Assert.Equal(requested.ToString(), legacyException.Requested);
+            Assert.Equal(low.ToString(), legacyException.Low);
+            Assert.Equal(high.ToString(), legacyException.High);
+
+            var unexpected = new InvalidOperationException("Provider failure");
+            cursor.NextMoveException = unexpected;
+            Assert.Same(
+                unexpected,
+                Assert.Throws<InvalidOperationException>(() => interfaceCursor.MoveNextWithResult()));
+
+            Assert.Equal(6, cursor.MoveNextCount);
+            Assert.Equal(2, cursor.GetCurrentCount);
+            Assert.Equal(0, cursor.DisposeCount);
+        }
+        finally
+        {
+            cursor.Dispose();
+        }
+
+        Assert.Equal(1, cursor.DisposeCount);
     }
 
     [Fact, TestCategory("BVT"), TestCategory("Streaming")]
@@ -213,53 +278,39 @@ public class SimpleQueueCacheTests
         Assert.Equal(QueueCacheCursorMoveResultKind.NoData, cursor.MoveNextWithResult().Kind);
     }
 
-    [Theory]
-    [InlineData(StreamSubscriptionStartPosition.Latest)]
-    [InlineData(StreamSubscriptionStartPosition.EarliestAvailable)]
-    public void TypedPositionDispatchesToLegacyProvider(StreamSubscriptionStartPosition position)
+    [Fact]
+    public void LatestPositionUsesTypedAcquisition()
     {
-        var provider = new LegacyPositionQueueCache();
+        var provider = new TypedAcquisitionQueueCache();
         IQueueCache cache = provider;
         var stream = StreamId.Create("namespace", Guid.NewGuid());
 
-        var result = cache.TryGetCacheCursorAtPosition(stream, position);
+        var result = cache.TryGetCacheCursorAtPosition(stream, StreamSubscriptionStartPosition.Latest);
 
         Assert.Equal(QueueCacheCursorResultKind.Success, result.Kind);
         Assert.Same(provider.Cursor, result.Cursor);
         Assert.Null(result.CacheMiss);
-        Assert.Equal((stream, position), provider.Request);
-    }
+        Assert.Equal(stream, provider.Request!.Value.StreamId);
+        Assert.Null(provider.Request.Value.Token);
 
-    [Fact]
-    public void TypedPositionAdaptsLegacyFailures()
-    {
-        var expected = new QueueCacheMissException("requested", "low", "high");
-        var provider = new LegacyPositionQueueCache { PositionException = expected };
-        IQueueCache cache = provider;
-
-        var result = cache.TryGetCacheCursorAtPosition(default, StreamSubscriptionStartPosition.EarliestAvailable);
-
+        provider.Result = QueueCacheCursorResult<IQueueCacheCursor>.FromCacheMiss(new("requested", "low", "high"));
+        result = cache.TryGetCacheCursorAtPosition(stream, StreamSubscriptionStartPosition.Latest);
         Assert.Equal(QueueCacheCursorResultKind.CacheMiss, result.Kind);
         Assert.Null(result.Cursor);
         var miss = Assert.NotNull(result.CacheMiss);
         Assert.Equal("requested", miss.Requested);
         Assert.Equal("low", miss.Low);
         Assert.Equal("high", miss.High);
-#pragma warning disable CS0618 // Verify compatibility of the obsolete wrapper.
-        Assert.Same(expected, Assert.Throws<QueueCacheMissException>(
-            () => cache.GetCacheCursorAtPosition(default, StreamSubscriptionStartPosition.EarliestAvailable)));
-#pragma warning restore CS0618
-
-        provider.PositionException = new NotSupportedException();
-        result = cache.TryGetCacheCursorAtPosition(default, StreamSubscriptionStartPosition.EarliestAvailable);
+        provider.Result = QueueCacheCursorResult<IQueueCacheCursor>.NotSupported;
+        result = cache.TryGetCacheCursorAtPosition(stream, StreamSubscriptionStartPosition.Latest);
         Assert.Equal(QueueCacheCursorResultKind.NotSupported, result.Kind);
         Assert.Null(result.Cursor);
         Assert.Null(result.CacheMiss);
 
-        var failure = new InvalidOperationException("Provider failure");
-        provider.PositionException = failure;
-        Assert.Same(failure, Assert.Throws<InvalidOperationException>(
-            () => cache.TryGetCacheCursorAtPosition(default, StreamSubscriptionStartPosition.Latest)));
+        provider.Request = null;
+        result = cache.TryGetCacheCursorAtPosition(stream, StreamSubscriptionStartPosition.EarliestAvailable);
+        Assert.Equal(QueueCacheCursorResultKind.NotSupported, result.Kind);
+        Assert.Null(provider.Request);
     }
 
     [Fact]
@@ -282,7 +333,7 @@ public class SimpleQueueCacheTests
     }
 
     [Fact, TestCategory("BVT"), TestCategory("Streaming")]
-    public void LatestLegacyPositionPreservesProviderException()
+    public void LegacyAcquisitionPreservesProviderException()
     {
         var innerException = new InvalidOperationException("inner");
         var expected = new QueueCacheMissException("provider message", innerException);
@@ -290,11 +341,27 @@ public class SimpleQueueCacheTests
 
 #pragma warning disable CS0618 // Verify compatibility of the obsolete wrapper.
         var actual = Assert.Throws<QueueCacheMissException>(
-            () => cache.GetCacheCursorAtPosition(default, StreamSubscriptionStartPosition.Latest));
+            () => cache.GetCacheCursor(default, null));
 #pragma warning restore CS0618
 
         Assert.Same(expected, actual);
         Assert.Same(innerException, actual.InnerException);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LatestPositionPropagatesUnexpectedAcquisitionErrors(bool notSupported)
+    {
+        Exception expected = notSupported
+            ? new NotSupportedException("Token acquisition failure")
+            : new InvalidOperationException("Provider failure");
+        IQueueCache cache = new LegacyThrowingQueueCache(expected);
+
+        var actual = Record.Exception(
+            () => cache.TryGetCacheCursorAtPosition(default, StreamSubscriptionStartPosition.Latest));
+
+        Assert.Same(expected, actual);
     }
 
     [Fact, TestCategory("BVT"), TestCategory("Streaming")]
@@ -307,7 +374,8 @@ public class SimpleQueueCacheTests
             () => ((IQueueCache)cache).TryGetCacheCursorAtPosition(
                 default,
                 StreamSubscriptionStartPosition.Latest));
-        Assert.True(cursor.IsDisposed);
+        Assert.Same(cursor, cache.Cursor);
+        Assert.Equal(1, cursor.DisposeCount);
     }
 
     [Fact, TestCategory("BVT"), TestCategory("Streaming")]
@@ -320,7 +388,62 @@ public class SimpleQueueCacheTests
             () => ((IQueueCache)cache).TryGetCacheCursorAtPosition(
                 default,
                 StreamSubscriptionStartPosition.Latest));
-        Assert.True(cursor.IsDisposed);
+        Assert.Same(cursor, cache.Cursor);
+        Assert.Equal(1, cursor.DisposeCount);
+    }
+
+    private sealed class DerivedCursorSimpleQueueCache() : SimpleQueueCache(10, NullLogger.Instance)
+    {
+        public DerivedSimpleQueueCacheCursor? Cursor { get; private set; }
+        public int GetCacheCursorCount { get; private set; }
+
+        [Obsolete("Use IQueueCache.TryGetCacheCursor instead.")]
+        public override IQueueCacheCursor GetCacheCursor(StreamId streamId, StreamSequenceToken? token)
+        {
+            GetCacheCursorCount++;
+            var cursor = new DerivedSimpleQueueCacheCursor(this, streamId);
+            if (InitializeCursor(cursor, token) is { } cacheMiss)
+            {
+                throw cacheMiss.ToException();
+            }
+
+            return Cursor = cursor;
+        }
+    }
+
+    private sealed class DerivedSimpleQueueCacheCursor(
+        SimpleQueueCache cache,
+        StreamId streamId) : SimpleQueueCacheCursor(cache, streamId, NullLogger.Instance)
+    {
+        public Exception? NextMoveException { get; set; }
+        public int MoveNextCount { get; private set; }
+        public int GetCurrentCount { get; private set; }
+        public int DisposeCount { get; private set; }
+
+        [Obsolete("Use MoveNextWithResult instead.")]
+        public override bool MoveNext()
+        {
+            MoveNextCount++;
+            if (NextMoveException is { } exception)
+            {
+                NextMoveException = null;
+                throw exception;
+            }
+
+            return base.MoveNext();
+        }
+
+        public override IBatchContainer? GetCurrent(out Exception? exception)
+        {
+            GetCurrentCount++;
+            return base.GetCurrent(out exception);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            DisposeCount++;
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class DerivedSimpleQueueCache : SimpleQueueCache
@@ -346,11 +469,11 @@ public class SimpleQueueCacheTests
         public override bool IsUnderPressure() => false;
     }
 
-    private sealed class LegacyPositionQueueCache : IQueueCache
+    private sealed class TypedAcquisitionQueueCache : IQueueCache
     {
         public IQueueCacheCursor Cursor { get; } = new EmptyCursor();
-        public Exception? PositionException { get; set; }
-        public (StreamId, StreamSubscriptionStartPosition)? Request { get; private set; }
+        public QueueCacheCursorResult<IQueueCacheCursor>? Result { get; set; }
+        public (StreamId StreamId, StreamSequenceToken? Token)? Request { get; set; }
 
         public void AddToCache(IList<IBatchContainer> messages)
         {
@@ -359,19 +482,14 @@ public class SimpleQueueCacheTests
         public int GetMaxAddCount() => 1;
 
         public IQueueCacheCursor GetCacheCursor(StreamId streamId, StreamSequenceToken? token)
-            => throw new InvalidOperationException("Positioning must use the legacy position method.");
+            => throw new InvalidOperationException("Positioning must use typed acquisition.");
 
-        IQueueCacheCursor IQueueCache.GetCacheCursorAtPosition(
+        QueueCacheCursorResult<IQueueCacheCursor> IQueueCache.TryGetCacheCursor(
             StreamId streamId,
-            StreamSubscriptionStartPosition startPosition)
+            StreamSequenceToken? token)
         {
-            Request = (streamId, startPosition);
-            if (PositionException is { } exception)
-            {
-                throw exception;
-            }
-
-            return Cursor;
+            Request = (streamId, token);
+            return Result ?? QueueCacheCursorResult<IQueueCacheCursor>.FromCursor(Cursor);
         }
 
         public bool IsUnderPressure() => false;
@@ -383,7 +501,7 @@ public class SimpleQueueCacheTests
         }
     }
 
-    private sealed class LegacyThrowingQueueCache(QueueCacheMissException exception) : IQueueCache
+    private sealed class LegacyThrowingQueueCache(Exception exception) : IQueueCache
     {
         public void AddToCache(IList<IBatchContainer> messages)
         {
@@ -480,18 +598,18 @@ public class SimpleQueueCacheTests
 
     private sealed class InvalidMoveResultCursor : EmptyCursor
     {
-        public bool IsDisposed { get; private set; }
+        public int DisposeCount { get; private set; }
 
-        public override void Dispose() => IsDisposed = true;
+        public override void Dispose() => DisposeCount++;
 
         public override QueueCacheCursorMoveResult MoveNextWithResult() => default;
     }
 
     private sealed class ThrowingMoveResultCursor : EmptyCursor
     {
-        public bool IsDisposed { get; private set; }
+        public int DisposeCount { get; private set; }
 
-        public override void Dispose() => IsDisposed = true;
+        public override void Dispose() => DisposeCount++;
 
         public override QueueCacheCursorMoveResult MoveNextWithResult()
             => throw new InvalidOperationException("Move failed.");

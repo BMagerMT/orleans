@@ -244,45 +244,6 @@ namespace Orleans.Providers.Streams.Common
             return QueueCacheCursorResult<IQueueCacheCursor>.FromCursor(cursor);
         }
 
-        /// <inheritdoc />
-        [Obsolete("Use IQueueCache.TryGetCacheCursorAtPosition instead.")]
-        IQueueCacheCursor IQueueCache.GetCacheCursorAtPosition(
-            StreamId streamId,
-            StreamSubscriptionStartPosition startPosition)
-        {
-            if (startPosition == StreamSubscriptionStartPosition.Latest)
-            {
-#pragma warning disable CS0618 // Preserve the exact legacy exception and cursor behavior.
-                var cursor = GetCacheCursor(streamId, null);
-#pragma warning restore CS0618
-                var retainCursor = false;
-                try
-                {
-#pragma warning disable CS0618 // Preserve the exact legacy exception and cursor behavior.
-                    cursor.MoveNext();
-#pragma warning restore CS0618
-                    retainCursor = true;
-                    return cursor;
-                }
-                finally
-                {
-                    if (!retainCursor)
-                    {
-                        cursor.Dispose();
-                    }
-                }
-            }
-
-            if (startPosition != StreamSubscriptionStartPosition.EarliestAvailable)
-            {
-                throw new ArgumentOutOfRangeException(nameof(startPosition), startPosition, "The subscription start position is not defined.");
-            }
-
-            var earliestCursor = new SimpleQueueCacheCursor(this, streamId, logger);
-            InitializeCursorAtEarliestAvailable(earliestCursor);
-            return earliestCursor;
-        }
-
         private void InitializeCursorAtEarliestAvailable(SimpleQueueCacheCursor cursor)
         {
             for (var node = cachedMessages.Last; node is not null; node = node.Previous)

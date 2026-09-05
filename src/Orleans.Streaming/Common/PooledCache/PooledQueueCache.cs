@@ -180,33 +180,6 @@ namespace Orleans.Providers.Streams.Common
         }
 
         /// <summary>
-        /// Acquires a cursor at the specified subscription start position.
-        /// </summary>
-        /// <param name="streamId">The stream identifier.</param>
-        /// <param name="startPosition">The initial subscription position.</param>
-        /// <returns>The cache cursor.</returns>
-        /// <exception cref="ArgumentOutOfRangeException"><paramref name="startPosition"/> is not defined.</exception>
-        /// <exception cref="QueueCacheMissException">
-        /// The requested position is older than the messages retained by the cache.
-        /// </exception>
-        /// <exception cref="NotSupportedException">
-        /// The cache does not support <paramref name="startPosition"/>.
-        /// </exception>
-        [Obsolete("Use TryGetCursorAtPosition instead.")]
-        public object GetCursorAtPosition(StreamId streamId, StreamSubscriptionStartPosition startPosition)
-        {
-            var result = TryGetCursorAtPosition(streamId, startPosition);
-            return result.Kind switch
-            {
-                QueueCacheCursorResultKind.Success => result.Cursor!,
-                QueueCacheCursorResultKind.CacheMiss => throw result.CacheMiss!.Value.ToException(),
-                QueueCacheCursorResultKind.NotSupported => throw new NotSupportedException(
-                    $"{GetType().FullName} does not support {startPosition} cursor positioning."),
-                _ => throw new InvalidOperationException("The cursor result is not initialized."),
-            };
-        }
-
-        /// <summary>
         /// Repositions an idle or unset cursor at the provided sequence token.
         /// </summary>
         /// <param name="cursorObj">The cursor to refresh.</param>

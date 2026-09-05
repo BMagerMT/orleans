@@ -250,7 +250,7 @@ namespace UnitTests.OrleansRuntime.Streams
         }
 
         [Fact, TestCategory("BVT"), TestCategory("Streaming")]
-        public void GetCursorAtPositionPreservesLegacyCursorBehavior()
+        public void GetCursorPreservesLegacyCursorBehavior()
         {
             var (cache, converter) = CreateCache();
             var stream = StreamId.Create(TestStreamNamespace, Guid.NewGuid());
@@ -260,7 +260,7 @@ namespace UnitTests.OrleansRuntime.Streams
                 converter.ToCachedMessage(new TestQueueMessage { StreamId = stream, SequenceNumber = 1 }, now),
             ], now);
 
-            var cursor = cache.GetCursorAtPosition(stream, StreamSubscriptionStartPosition.EarliestAvailable);
+            var cursor = cache.GetCursor(stream, new EventSequenceTokenV2(1));
 
             Assert.True(cache.TryGetNextMessage(cursor, out var message));
             Assert.Equal(1, message.SequenceToken.SequenceNumber);
