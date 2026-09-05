@@ -733,7 +733,8 @@ namespace UnitTests.StreamingTests
             public List<(
                 StreamId StreamId,
                 StreamSequenceToken? Token,
-                StreamSubscriptionStartPosition? Position)> Requests { get; } = [];
+                StreamSubscriptionStartPosition? Position)> Requests
+            { get; } = [];
             public IQueueCacheCursor? OldCursor => cacheMissCursor;
             public IQueueCacheCursor? ReplacementCursor => earliestCursor ?? tokenCursor;
             public int OldCursorMoveNextCount => cacheMissCursor?.MoveNextCount ?? 0;
